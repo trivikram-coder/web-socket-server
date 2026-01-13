@@ -1,4 +1,3 @@
-
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -6,38 +5,72 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
+// Socket.IO setup
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
   },
 });
-
+const roomChats={}
+const users={}
 io.on("connection", (socket) => {
-  console.log(`User ${socket.id} connected`);
-  socket.on("send-message",(data)=>{
-    console.log(data)
-    if(!data.room){
-      console.log("Sent")
-      socket.broadcast.emit("receive-message",data.message)
-      return;
-    }else{
-    socket.to(data.room).emit("receive-message",data.message)
+  console.log("User connected", socket.id);
+
+  socket.on("join-room", (data) => {
+    socket.join(data.roomId);
+
+    if (!users[data.roomId]) users[data.roomId] = [];
+
+    if (!users[data.roomId].some(u => u.userName === data.userName)) {
+      users[data.roomId].push({ userName: data.userName });
     }
-  })
-  socket.on("join-room",room=>{
-    socket.join(room)
-    console.log(`User joined in room ${room}`)
-  })
-  socket.on("change-code",data=>{
-    console.log(data.code)
-    socket.to(data.roomId).emit("receive-code",data)
-  })
-  socket.on("disconnect", () => {
-    console.log(`User ${socket.id} disconnected`);
+    console.log(users)
+    socket.emit("room-users", users[data.roomId]);
+    socket.emit('receive-message',{
+      chats:roomChats[data.roomId] || []
+    })
   });
+
+  socket.on("send-message", (data) => {
+    if (!roomChats[data.roomId]) roomChats[data.roomId] = [];
+
+    roomChats[data.roomId].push({
+      userName: data.userName,
+      message: data.message
+    });
+
+    io.to(data.roomId).emit("receive-message", {
+      chats: roomChats[data.roomId],
+      time: new Date().toLocaleString()
+    });
+  });
+  socket.on("get-users",roomId=>{
+    socket.emit("room-users",{
+      users:users[roomId] || []
+    })
+  })
+  socket.on("get-chats", (roomId) => {
+    socket.emit("receive-message", {
+      chats: roomChats[roomId] || []
+    });
+  });
+  socket.on("leave-room", ({ roomId, userName }) => {
+  socket.leave(roomId);
+
+  if (!users[roomId]) return;
+
+  users[roomId] = users[roomId].filter(
+    u => u.userName !== userName
+  );
+
+  // 🔥 Notify remaining users
+  io.to(roomId).emit("room-users", users[roomId]);
 });
 
+});
+
+// Start server
 server.listen(3000, () => {
-  console.log("Server running successfully on port 3000");
+  console.log("🚀 Server running on port 3000");
 });
