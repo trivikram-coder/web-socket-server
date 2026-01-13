@@ -22,8 +22,8 @@ io.on("connection", (socket) => {
 
     if (!users[data.roomId]) users[data.roomId] = [];
 
-    if (!users[data.roomId].some(u => u.userName === data.userName)) {
-      users[data.roomId].push({ userName: data.userName });
+    if (!users[data.roomId].some(u => u.socketId === socket.id)) {
+      users[data.roomId].push({ userName: data.userName,socketId:socket.id });
     }
     console.log(users)
     socket.emit("room-users", users[data.roomId]);
@@ -61,11 +61,21 @@ io.on("connection", (socket) => {
   if (!users[roomId]) return;
 
   users[roomId] = users[roomId].filter(
-    u => u.userName !== userName
+    u => u.socketId !== socket.id
   );
 
   // 🔥 Notify remaining users
+  console.log(users[roomId])
   io.to(roomId).emit("room-users", users[roomId]);
+});
+ socket.on("disconnect", () => {
+  for (const roomId in users) {
+    users[roomId] = users[roomId].filter(
+      u => u.socketId !== socket.id
+    );
+
+    io.to(roomId).emit("room-users", users[roomId]);
+  }
 });
 
 });
