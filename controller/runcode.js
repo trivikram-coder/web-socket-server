@@ -118,6 +118,9 @@ const runJava = (code, res) => {
 
   exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
     if (error) {
+     
+    console.error("JAVA EXEC ERROR:", error); // 🔥 IMPORTANT
+    console.error("STDERR:", stderr);
       const outputErr = simplifyJavaError(stderr || error.message);
 
       return res.json({
