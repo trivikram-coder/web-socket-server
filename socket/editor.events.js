@@ -1,10 +1,14 @@
-const roomCode = {};
+const roomCode = {}; // roomId -> { code, language }
 
 const socketFun = (io, socket) => {
-  socket.on("code-change", ({ roomId, userName, code }) => {
-    roomCode[roomId]=code
-    console.log(roomCode)
-    socket.to(roomId).emit("code-sent", code);
+  socket.on("code-change", ({ roomId, userName, code, language }) => {
+    roomCode[roomId] = { code, language };
+
+    console.log("RoomCode:", roomCode);
+
+    // send to others in the room
+    socket.to(roomId).emit("code-sent", { code, language });
   });
 };
-module.exports={socketFun,roomCode}
+
+module.exports = { socketFun, roomCode };

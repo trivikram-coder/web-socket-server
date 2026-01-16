@@ -5,12 +5,12 @@ module.exports = (io, socket) => {
 
   socket.on("send-message", ({ roomId, userName, message }) => {
     if (!roomChats[roomId]) roomChats[roomId] = [];
-
+    
     roomChats[roomId].push({
       userName,
       message
     });
-    
+    console.log(roomChats[roomId])
     // 🔥 realtime broadcast
     io.to(roomId).emit("receive-message", {
       chats: roomChats[roomId],

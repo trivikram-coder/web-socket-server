@@ -103,44 +103,43 @@ function simplifyJavaError(rawError) {
 
 const runJava = (code, res) => {
   if (!code || typeof code !== "string") {
-    return res.json({
-      output: "No code provided",
-      status: "error"
-    });
+    return res.json({ output: "No code provided", status: "error" });
   }
 
-  
+  if (!/public\s+class\s+Main/.test(code)) {
+    return res.json({
+      output: "Error: public class Main not found",
+      status: "error",
+    });
+  }
 
   const javaFile = path.join(tempDir, "Main.java");
-  fs.writeFileSync(javaFile, code);
+  fs.writeFileSync(javaFile, code, "utf8");
 
-  const command = `javac ${javaFile} && java -cp ${tempDir} Main`;
+  // ✅ SINGLE LINE COMMAND (CRITICAL FIX)
+  const command = "javac Main.java && java -Xms64m -Xmx128m -cp . Main";
 
-  exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
-    if (error) {
-     
-    console.error("JAVA EXEC ERROR:", error); // 🔥 IMPORTANT
-    console.error("STDERR:", stderr);
-      const outputErr = simplifyJavaError(stderr || error.message);
+  exec(
+    command,
+    {
+      cwd: tempDir,
+      timeout: 10000,
+      maxBuffer: 2 * 1024 * 1024,
+    },
+    (error, stdout, stderr) => {
+      if (error) {
+        return res.json({
+          output: simplifyJavaError(stderr || error.message),
+          status: "error",
+        });
+      }
 
-      return res.json({
-        output: outputErr,
-        status: "error",
+      res.json({
+        output: stdout.trim() || "No output",
+        status: "success",
       });
     }
-    const hasMainClass = /public\s+class\s+Main/.test(code);
-
-  if (!hasMainClass) {
-    return res.json({
-      output: "public class Main not found",
-      status: "error"
-    });
-  }
-    res.json({
-      output: stdout,
-      status: "success",
-    });
-  });
+  );
 };
 
 
