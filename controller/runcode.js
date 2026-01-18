@@ -1,111 +1,69 @@
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { spawn } = require("child_process");
 
-// temp folder path
+// ===========================
+// TEMP DIR
+// ===========================
 const tempDir = path.join(__dirname, "..", "temp");
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-// temp folder create cheyyali (if not exists)
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir);
-}
+// ===========================
+// MAIN CONTROLLER
+// ===========================
+const runCode = (req, res) => {
+  const { language, code, input } = req.body || {};
 
-/**
- * MAIN CONTROLLER
- * POST /run
- * body: { language, code }
- */
-const runCode = (req,res) => {
-  const{language,code}=req.body
+  if (!language || !code) {
+    return res.status(400).json({
+      output: "language and code are required",
+      status: "error",
+    });
+  }
+
   switch (language) {
     case "javascript":
-      return runJavaScript(code, res);
-
+      return runJavaScript(code, input, res);
     case "typescript":
-      return runTypeScript(code, res);
-
+      return runTypeScript(code, input, res);
     case "java":
-      return runJava(code, res);
-
+      return runJava(code, input, res);
     case "python":
-      return runPython(code, res);
-
-    case "html":
-    case "css":
-      return res.json({
-        output: "HTML/CSS execution is not supported. Use Preview mode.",
-        status: "info"
-      });
-
+      return runPython(code, input, res);
     default:
       return res.json({
         output: "Language not supported",
-        status: "error"
+        status: "error",
       });
   }
 };
-const runJavaScript = (code, res) => {
+
+// ===========================
+// JAVASCRIPT
+// ===========================
+const runJavaScript = (code, input, res) => {
   const file = path.join(tempDir, "main.js");
   fs.writeFileSync(file, code);
-
-  exec(`node ${file}`, { timeout: 3000 }, (err, stdout, stderr) => {
-    if (err) {
-      return res.json({
-        output: stderr || err.message,
-        status: "error"
-      });
-    }
-    res.json({ output: stdout, status: "success" });
-  });
+  handleProcessIO(spawn("node", [file]), input, res);
 };
- const runTypeScript = (code, res) => {
+
+// ===========================
+// TYPESCRIPT
+// ===========================
+const runTypeScript = (code, input, res) => {
   const file = path.join(tempDir, "main.ts");
   fs.writeFileSync(file, code);
-
-  exec(
-    `npx ts-node --transpile-only ${file}`,
-    { timeout: 5000 },
-    (error, stdout, stderr) => {
-      if (error) {
-        return res.json({
-          output: stderr || error.message || "TypeScript compilation error",
-          status: "error",
-        });
-      }
-
-      res.json({
-        output: stdout || "Program executed successfully",
-        status: "success",
-      });
-    }
+  handleProcessIO(
+    spawn("npx", ["ts-node", "--transpile-only", file]),
+    input,
+    res
   );
 };
 
-
-/**
- * JAVA COMPILE & RUN
- */
-function simplifyJavaError(rawError) {
-  return rawError
-    .split("\n")
-    .filter(line => line.includes("error"))
-    .map(line => {
-      // extract line number
-      const match = line.match(/Main\.java:(\d+): error: (.*)/);
-      if (match) {
-        return `Line ${match[1]}: ${match[2]}`;
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-const runJava = (code, res) => {
-  if (!code || typeof code !== "string") {
-    return res.json({ output: "No code provided", status: "error" });
-  }
-
+// ===========================
+// JAVA (EB ZIP SAFE – AMAZON CORRETTO)
+// ===========================
+const runJava = (code, input, res) => {
   if (!/public\s+class\s+Main/.test(code)) {
     return res.json({
       output: "Error: public class Main not found",
@@ -114,91 +72,136 @@ const runJava = (code, res) => {
   }
 
   const javaFile = path.join(tempDir, "Main.java");
-  fs.writeFileSync(javaFile, code, "utf8");
+  fs.writeFileSync(javaFile, code);
 
-  // ✅ SINGLE LINE COMMAND (CRITICAL FIX)
-  const command = "javac Main.java && java -Xms64m -Xmx128m -cp . Main";
+  // ✅ Correct paths for Amazon Linux + Corretto
+  const JAVAC = "javac";
+  const JAVA = "java";
 
-  exec(
-    command,
-    {
-      cwd: tempDir,
-      timeout: 10000,
-      maxBuffer: 2 * 1024 * 1024,
-    },
-    (error, stdout, stderr) => {
-      if (error) {
-        return res.json({
-          output: simplifyJavaError(stderr || error.message),
-          status: "error",
-        });
-      }
+  const compile = spawn(JAVAC, ["Main.java"], { cwd: tempDir });
 
-      res.json({
-        output: stdout.trim() || "No output",
-        status: "success",
+  let compileError = "";
+
+  compile.stderr.on("data", (d) => {
+    compileError += d.toString();
+  });
+
+  compile.on("error", (err) => {
+    return res.status(500).json({
+      output: "Java compiler error",
+      details: err.message,
+      status: "error",
+    });
+  });
+
+  compile.on("close", (status) => {
+    if (status !== 0) {
+      return res.json({
+        output: simplifyJavaError(compileError),
+        status: "error",
       });
     }
-  );
+
+    const run = spawn(JAVA, ["Main"], { cwd: tempDir });
+
+    run.on("error", (err) => {
+      return res.status(500).json({
+        output: "Java runtime error",
+        details: err.message,
+        status: "error",
+      });
+    });
+
+    handleProcessIO(run, input, res);
+  });
 };
 
+// ===========================
+// PYTHON
+// ===========================
+const runPython = (code, input, res) => {
+  const file = path.join(tempDir, "script.py");
+  fs.writeFileSync(file, code);
+  handleProcessIO(spawn("python3", [file]), input, res, true);
+};
 
-/**
- * PYTHON RUN
- */
-function simplifyPythonError(rawError) {
-  if (!rawError) return "Unknown error";
+// ===========================
+// COMMON PROCESS HANDLER
+// ===========================
+function handleProcessIO(child, input, res, isPython = false) {
+  let output = "";
+  let error = "";
 
-  const lines = rawError.split("\n");
-
-  let lineNumber = "";
-  let errorType = "";
-  let message = "";
-
-  for (let line of lines) {
-    // extract line number
-    const lineMatch = line.match(/line\s+(\d+)/);
-    if (lineMatch) {
-      lineNumber = lineMatch[1];
-    }
-
-    // extract error type + message
-    if (line.includes("Error")) {
-      const parts = line.split(":");
-      errorType = parts[0].trim();
-      message = parts.slice(1).join(":").trim();
-    }
+  try {
+    child.stdin.write((input || "") + "\n");
+    child.stdin.end();
+  } catch (e) {
+    return res.status(500).json({
+      output: "Failed to write input",
+      status: "error",
+    });
   }
 
-  if (!errorType) {
-    return rawError;
-  }
+  child.stdout.on("data", (d) => (output += d.toString()));
+  child.stderr.on("data", (d) => (error += d.toString()));
 
-  return `Line ${lineNumber}: ${errorType} - ${message}`;
-}
+  child.on("error", (err) => {
+    return res.status(500).json({
+      output: "Runtime error",
+      details: err.message,
+      status: "error",
+    });
+  });
 
-const runPython = (code, res) => {
-  const pythonFile = path.join(tempDir, "script.py");
-
-  // Python code write
-  fs.writeFileSync(pythonFile, code);
-
-  const command = `python ${pythonFile}`;
-
-  exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
+  child.on("close", () => {
     if (error) {
-        const operror=simplifyPythonError(stderr || error.message)
       return res.json({
-        output: operror,
+        output: isPython ? simplifyPythonError(error) : error,
         status: "error",
       });
     }
 
     res.json({
-      output: stdout,
+      output: output || "No output",
       status: "success",
     });
   });
-};
+}
 
+// ===========================
+// ERROR HELPERS (NO CRASH)
+// ===========================
+function simplifyJavaError(rawError) {
+  if (!rawError) return "Compilation failed";
+
+  return (
+    rawError
+      .split("\n")
+      .filter((line) => line.includes("error"))
+      .map((line) => {
+        const match = line.match(/Main\.java:(\d+): error: (.*)/);
+        if (match) return `Line ${match[1]}: ${match[2]}`;
+        return line;
+      })
+      .join("\n") || rawError
+  );
+}
+
+function simplifyPythonError(rawError) {
+  if (!rawError) return "Python error";
+
+  const lines = rawError.split("\n");
+  let lineNo = "";
+  let msg = "";
+
+  for (const line of lines) {
+    const m = line.match(/line (\d+)/);
+    if (m) lineNo = m[1];
+    if (line.includes("Error")) msg = line.trim();
+  }
+
+  return lineNo ? `Line ${lineNo}: ${msg}` : rawError;
+}
+
+// ===========================
 module.exports = runCode;

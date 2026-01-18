@@ -25,8 +25,10 @@ const users = {};     // { roomId: [ { userName, socketId } ] }
 
 const socketHandler=require("./socket")
 socketHandler(io)
-
+app.get("/",(req,res)=>{
+  res.send("Socket and code runner service is running 🚀🚀🚀")
+})
 // Start server
-server.listen(3000, () => {
-  console.log("🚀 Server running on port 3000");
+server.listen(process.env.PORT, () => {
+  console.log("🚀 Server running on port ",process.env.PORT);
 });
