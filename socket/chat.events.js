@@ -10,7 +10,7 @@ module.exports = (io, socket) => {
       userName,
       message
     });
-    console.log(roomChats[roomId])
+   
     // 🔥 realtime broadcast
     io.to(roomId).emit("receive-message", {
       chats: roomChats[roomId],
